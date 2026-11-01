@@ -1,0 +1,9 @@
+# LF in the repository and in every checkout, on every OS, so that `zig fmt`
+# and CI agree with local files regardless of core.autocrlf.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.ttf binary
+*.otf binary
+*.wasm binary

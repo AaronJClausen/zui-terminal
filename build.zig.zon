@@ -1,0 +1,10 @@
+.{
+    .name = .zui_terminal,
+    .version = "0.1.0",
+    .fingerprint = 0x509d3a7ec770877f, // Changing this has security and trust implications.
+    .minimum_zig_version = "0.16.0",
+    .dependencies = .{
+        .zui = .{ .path = "../zui" },
+    },
+    .paths = .{ "build.zig", "build.zig.zon", "src", "examples", "README.md", "LICENSE" },
+}
