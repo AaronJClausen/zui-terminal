@@ -16,8 +16,6 @@ concurrency:
 env:
   ZIG_VERSION: 0.16.0
 
-# build.zig.zon depends on zui by path (../zui), so zui is checked out
-# beside this repository.
 jobs:
   lint:
     name: Format
@@ -25,13 +23,10 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          path: zui-terminal
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
         with:
           version: ${{ env.ZIG_VERSION }}
-      - working-directory: zui-terminal
-        run: zig fmt --check build.zig build.zig.zon src examples
+      - run: zig fmt --check build.zig build.zig.zon src examples
 
   test:
     name: Test and build (${{ matrix.os }})
@@ -43,20 +38,11 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          path: zui-terminal
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: AaronJClausen/zui
-          path: zui
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
         with:
           version: ${{ env.ZIG_VERSION }}
-      - working-directory: zui-terminal
-        run: zig build test
-      - working-directory: zui-terminal
-        run: zig build check
+      - run: zig build test
+      - run: zig build check
       - name: Render the demo offscreen
-        working-directory: zui-terminal
         shell: bash
         run: zig build demo -- --dump | tee dump.txt && grep -q "zui + terminal" dump.txt

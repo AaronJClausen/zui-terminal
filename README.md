@@ -8,8 +8,7 @@ has no dependencies besides zui.
 ## Requirements
 
 - Zig **0.16.0**
-- zui checked out beside this repository (`../zui`), while the two are
-  developed together
+- zui, fetched automatically
 - A terminal with VT sequences, 24-bit color and SGR mouse reports:
   Windows Terminal, the Windows 10+ console, or any xterm-compatible
   terminal on Linux and macOS
@@ -23,6 +22,18 @@ zig build demo -- --dump # render offscreen at 100×30 and print the glyphs
 
 The demo runs `examples/showcase.zig`, the same UI as the zui-sokol demo,
 so the two renderers can be compared.
+
+## Developing against a local zui
+
+`build.zig.zon` pins zui to a commit. To build against a zui working copy
+instead, without editing it:
+
+```sh
+zig build test --fork=../zui
+```
+
+To move the pin, push the zui change and run
+`zig fetch --save=zui git+https://github.com/AaronJClausen/zui#<commit>`.
 
 ## How zui maps onto cells
 
