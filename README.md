@@ -25,6 +25,15 @@ zig build demo -- --dump # render offscreen at 100×30 and print the glyphs
 The demo runs `examples/showcase.zig`, the same UI as the zui-sokol demo,
 so the two renderers can be compared.
 
+## Conformance
+
+`zig build conformance` runs zui's renderer suite
+(`zui_testing.expectRendererConforms`) against the renderer, and
+`zig build test` runs it too. `src/conformance.zig` draws into a `Screen`
+that is never shown and reads each pixel back as the cell covering it,
+so the suite checks every clip, fill and border cell exactly, with no
+tolerance. CI runs it on Linux, Windows and macOS.
+
 ## Developing against a local zui
 
 `build.zig.zon` pins zui to a commit. To build against a zui working copy

@@ -31,7 +31,21 @@ pub fn build(b: *std.Build) void {
         },
     });
     const unit_tests = b.addTest(.{ .root_module = test_module });
-    b.step("test", "Run the backend's unit tests").dependOn(&b.addRunArtifact(unit_tests).step);
+    const test_step = b.step("test", "Run the backend's unit tests and zui's renderer suite");
+    test_step.dependOn(&b.addRunArtifact(unit_tests).step);
+
+    const conformance_tests = b.addTest(.{ .root_module = b.createModule(.{
+        .root_source_file = b.path("src/conformance.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "zui_terminal", .module = backend_module },
+            .{ .name = "zui_testing", .module = zui_dependency.module("zui_testing") },
+        },
+    }) });
+    const run_conformance = b.addRunArtifact(conformance_tests);
+    b.step("conformance", "Run zui's renderer suite against the renderer").dependOn(&run_conformance.step);
+    test_step.dependOn(&run_conformance.step);
 
     const demo = b.addExecutable(.{
         .name = "zui-terminal-demo",
