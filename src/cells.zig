@@ -101,19 +101,10 @@ pub const CellBuffer = struct {
     }
 };
 
-/// Hooks for payloads a terminal cannot draw on its own. Each receives the
-/// cells the payload covers, already clipped.
-pub fn RenderOptions(comptime Command: type) type {
-    const Payload = @FieldType(Command, "payload");
-    return struct {
-        draw_custom: ?*const fn (data: @FieldType(Payload, "custom"), area: CellRect, buffer: *CellBuffer) void = null,
-        draw_image: ?*const fn (handle: @FieldType(Payload, "image"), area: CellRect, buffer: *CellBuffer) void = null,
-    };
-}
-
 /// Paints one frame's commands into `buffer`, in order. Present the buffer
-/// with `Screen.present`.
-pub fn render(comptime Command: type, buffer: *CellBuffer, cell_size: [2]f32, commands: []const Command, options: RenderOptions(Command)) void {
+/// with `Screen.present`. A terminal draws only the base commands, so this
+/// `switch` names those five and nothing else.
+pub fn render(buffer: *CellBuffer, cell_size: [2]f32, commands: anytype) void {
     var clips: ClipStack = .{ .whole_buffer = buffer.bounds() };
     for (commands) |command| {
         const area = CellRect.fromLayout(command.bounds, cell_size);
@@ -121,8 +112,6 @@ pub fn render(comptime Command: type, buffer: *CellBuffer, cell_size: [2]f32, co
             .rectangle => |rectangle| fillRectangle(buffer, area.intersect(clips.current()), rectangle.color),
             .border => |border| drawBorder(buffer, area, clips.current(), border.color, border.widths, border.corner_radius),
             .text => |text| drawText(buffer, area, clips.current(), text.content, text.style.color, (cell_size[0] + text.style.letter_spacing) / cell_size[0]),
-            .image => |handle| if (options.draw_image) |draw_image| draw_image(handle, area.intersect(clips.current()), buffer),
-            .custom => |data| if (options.draw_custom) |draw_custom| draw_custom(data, area.intersect(clips.current()), buffer),
             .clip_begin => |clip| clips.push(CellRect.fromLayout(clip, cell_size)),
             .clip_end => clips.pop(),
         }
@@ -303,7 +292,7 @@ test "text is clipped and borders do not overwrite it" {
         .{ .bounds = .{}, .id = 0, .z = 0, .payload = .clip_end },
         .{ .bounds = .{ .x = 0, .y = 0, .width = 80, .height = 48 }, .id = 0, .z = 0, .payload = .{ .border = .{ .color = .white, .widths = .all(1), .corner_radius = .zero } } },
     };
-    render(TestCommand, &buffer, .{ 8, 16 }, &commands, .{});
+    render(&buffer, .{ 8, 16 }, &commands);
     var output: [64]u8 = undefined;
     try testing.expectEqualStrings("┌────────┐", rowText(&buffer, 0, &output));
     try testing.expectEqualStrings("│clipp   │", rowText(&buffer, 1, &output));
@@ -316,7 +305,7 @@ test "a one-row border becomes brackets" {
     const commands = [_]TestCommand{
         .{ .bounds = .{ .width = 32, .height = 16 }, .id = 0, .z = 0, .payload = .{ .border = .{ .color = .white, .widths = .all(1), .corner_radius = .zero } } },
     };
-    render(TestCommand, &buffer, .{ 8, 16 }, &commands, .{});
+    render(&buffer, .{ 8, 16 }, &commands);
     var output: [16]u8 = undefined;
     try testing.expectEqualStrings("[  ]", rowText(&buffer, 0, &output));
 }
@@ -328,7 +317,7 @@ test "translucent rectangles blend over what is below" {
         .{ .bounds = .{ .width = 16, .height = 16 }, .id = 0, .z = 0, .payload = .{ .rectangle = .{ .color = .white, .corner_radius = .zero } } },
         .{ .bounds = .{ .width = 8, .height = 16 }, .id = 0, .z = 0, .payload = .{ .rectangle = .{ .color = .rgba(0x00000080), .corner_radius = .zero } } },
     };
-    render(TestCommand, &buffer, .{ 8, 16 }, &commands, .{});
+    render(&buffer, .{ 8, 16 }, &commands);
     try testing.expect(buffer.at(0, 0).background.r < 200);
     try testing.expectEqual(@as(u8, 255), buffer.at(1, 0).background.r);
 }
@@ -339,7 +328,7 @@ test "letter spacing spreads glyphs over the cells it covers" {
     const commands = [_]TestCommand{
         .{ .bounds = .{ .width = 48, .height = 16 }, .id = 0, .z = 0, .payload = .{ .text = .{ .content = "abc", .style = .{ .letter_spacing = 8 }, .line = 0 } } },
     };
-    render(TestCommand, &buffer, .{ 8, 16 }, &commands, .{});
+    render(&buffer, .{ 8, 16 }, &commands);
     var output: [16]u8 = undefined;
     try testing.expectEqualStrings("a b c ", rowText(&buffer, 0, &output));
 }

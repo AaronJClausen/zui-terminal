@@ -62,6 +62,12 @@ pub const Terminal = struct {
         return .{ window_size.col, window_size.row };
     }
 
+    /// What a `Renderer` draws into: the terminal at its current size.
+    pub fn surface(self: *Terminal) zui.Surface {
+        const columns, const rows = self.size();
+        return .{ .terminal = .{ .columns = columns, .rows = rows } };
+    }
+
     /// The host's monotonic clock, for frame records.
     pub fn now(self: *const Terminal) zui.Instant {
         return .fromTimestamp(std.Io.Timestamp.now(self.io, .awake));

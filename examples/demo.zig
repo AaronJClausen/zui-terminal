@@ -55,20 +55,24 @@ pub fn main(init: std.process.Init) !void {
     var decoder: zui_terminal.InputDecoder = .{ .cell_size = text.cell_size };
     var stdout_buffer: [64 * 1024]u8 = undefined;
     var stdout_writer = std.Io.File.stdout().writer(init.io, &stdout_buffer);
+    var renderer: zui_terminal.Renderer = .{
+        .gpa = init.gpa,
+        .screen = &screen,
+        .output = &stdout_writer.interface,
+        .cell_size = text.cell_size,
+        .background = showcase.palette.background,
+    };
     var read_buffer: [4096]u8 = undefined;
 
     while (!decoder.quit_requested) {
-        const size = terminal.size();
+        const surface = terminal.surface();
         ui.beginFrame(&.{
-            .params = .{ .now = terminal.now(), .viewport = viewportFor(size, text.cell_size) },
+            .params = .{ .now = terminal.now(), .viewport = viewportFor(.{ surface.terminal.columns, surface.terminal.rows }, text.cell_size) },
             .events = decoder.take(),
         });
         showcase.declare(&ui);
         const frame = ui.endFrame();
-
-        const cells = try screen.begin(init.gpa, size, showcase.palette.background);
-        zui_terminal.render(Ui.RenderCommand, cells, text.cell_size, frame.commands(), .{});
-        try screen.present(&stdout_writer.interface);
+        try renderer.zuiSubmit(surface, frame);
         ui.release(frame);
 
         terminal.wait(ui.nextFrame());
@@ -105,7 +109,7 @@ fn dumpFrame(init: std.process.Init) !void {
         const frame = ui.endFrame();
         defer ui.release(frame);
         cells.fill(.{ .foreground = showcase.palette.background, .background = showcase.palette.background });
-        zui_terminal.render(Ui.RenderCommand, &cells, text.cell_size, frame.commands(), .{});
+        zui_terminal.render(&cells, text.cell_size, frame.commands());
     }
 
     var stdout_buffer: [16 * 1024]u8 = undefined;

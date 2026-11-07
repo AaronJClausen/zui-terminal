@@ -3,7 +3,8 @@
 A terminal backend for [zui](https://github.com/AaronJClausen/zui): it
 decodes keys, mouse reports and focus reports into the events of zui's
 frame records, measures text in cells through zui's text contract, and
-paints zui's render commands as 24-bit-color cells. It has no dependencies
+paints zui's frames as 24-bit-color cells, as a renderer (zui's renderer
+contract). It has no dependencies
 besides zui.
 
 ## Requirements
@@ -48,7 +49,6 @@ bounds.
 | `rectangle` | cell backgrounds; translucent colors blend over what is below |
 | `border` | box drawing (`┌─┐`, or `╭─╮` with a corner radius); `[` `]` on a one-row box |
 | `text` | one glyph per code point, one line per command; letter spacing moves each glyph to the nearest cell |
-| `image`, `custom` | `RenderOptions` hooks that paint cells directly |
 | `clip_begin` / `clip_end` | a stack of cell rectangles |
 | pointer | SGR mouse reports as `pointer_move`, `pointer_down` and `pointer_up`, in the order they arrived |
 | wheel | SGR wheel reports, `InputDecoder.wheel_step` units per notch |
@@ -76,20 +76,25 @@ defer terminal.leave();
 var text: zui_terminal.Text = .{};
 var ui = try Ui.init(gpa, io, &text);
 var screen: zui_terminal.Screen = .{};
+var renderer: zui_terminal.Renderer = .{ .gpa = gpa, .screen = &screen, .output = stdout, .background = background };
 var decoder: zui_terminal.InputDecoder = .{};
 
 while (!decoder.quit_requested) {
-    const size = terminal.size();
-    ui.beginFrame(&.{ .params = .{ .now = terminal.now(), .viewport = viewportFor(size) }, .events = decoder.take() });
+    const surface = terminal.surface(); // .terminal, with the size in cells
+    ui.beginFrame(&.{ .params = .{ .now = terminal.now(), .viewport = viewportFor(surface) }, .events = decoder.take() });
     // ... declare your UI ...
     const frame = ui.endFrame();
-    zui_terminal.render(Ui.RenderCommand, try screen.begin(gpa, size, background), text.cell_size, frame.commands(), .{});
-    try screen.present(stdout);
+    try renderer.zuiSubmit(surface, frame); // paints the cells and writes what changed
     ui.release(frame);
     terminal.wait(ui.nextFrame());
     decoder.feed(terminal.readAvailable(&read_buffer), terminal.now());
 }
 ```
+
+`zui_terminal.config(...)` builds the `Config` from `Renderer`'s
+declarations: it declares no optional commands and no payload types, so
+its `switch` over the commands names only the five base commands. To
+paint into a `CellBuffer` of your own, call `zui_terminal.render` instead.
 
 `terminal.wait` sleeps as `nextFrame` says: not at all, until a
 requested instant, or until input, a resize or a wake, so an idle UI uses
