@@ -1,12 +1,12 @@
 .{
     .name = .zui_terminal,
-    .version = "0.1.0",
+    .version = "0.2.0",
     .fingerprint = 0x509d3a7ec770877f, // Changing this has security and trust implications.
     .minimum_zig_version = "0.16.0",
     .dependencies = .{
         .zui = .{
-            .url = "git+https://github.com/AaronJClausen/zui#c41b5717f30be2852e035886bc31b9c12ff1d917",
-            .hash = "zui-0.5.0-xfvfqiO5BgBnODOv2IdQBpwOGjfIXwd6wbbxGl98ogjp",
+            .url = "git+https://github.com/AaronJClausen/zui#2df48f7f6cbf8ce841617bede8f7233c5a7894e7",
+            .hash = "zui-0.5.0-xfvfquN5CgBGpMIakyO99Qpm51V7novpEg8UxcSZ4Nb3",
         },
     },
     .paths = .{ "build.zig", "build.zig.zon", "src", "examples", "README.md", "LICENSE" },

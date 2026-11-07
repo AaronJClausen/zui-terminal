@@ -1,9 +1,10 @@
 # zui-terminal
 
 A terminal backend for [zui](https://github.com/AaronJClausen/zui): it
-reads keys and mouse reports from the terminal into `zui.Input`, measures
-text in cells, and paints zui's render commands as 24-bit-color cells. It
-has no dependencies besides zui.
+decodes keys, mouse reports and focus reports into the events of zui's
+frame records, measures text in cells through zui's text contract, and
+paints zui's render commands as 24-bit-color cells. It has no dependencies
+besides zui.
 
 ## Requirements
 
@@ -37,8 +38,8 @@ To move the pin, push the zui change and run
 
 ## How zui maps onto cells
 
-Layout stays in pixel-like units: a cell is `Platform.cell_size` units
-(8×16 by default), so a UI written for a pixel renderer still lays out
+Layout stays in pixel-like units: a cell is `Text.cell_size` units (8×16
+by default), so a UI written for a pixel renderer still lays out
 sensibly. A cell is painted when its center lies inside a command's
 bounds.
 
@@ -46,50 +47,57 @@ bounds.
 |---|---|
 | `rectangle` | cell backgrounds; translucent colors blend over what is below |
 | `border` | box drawing (`┌─┐`, or `╭─╮` with a corner radius); `[` `]` on a one-row box |
-| `text` | one glyph per code point, one line per command |
+| `text` | one glyph per code point, one line per command; letter spacing moves each glyph to the nearest cell |
 | `image`, `custom` | `RenderOptions` hooks that paint cells directly |
 | `clip_begin` / `clip_end` | a stack of cell rectangles |
+| pointer | SGR mouse reports as `pointer_move`, `pointer_down` and `pointer_up`, in the order they arrived |
 | wheel | SGR wheel reports, `InputDecoder.wheel_step` units per notch |
+| keys | navigation, function and editing keys; letters and digits also as keys, so Ctrl+S and Alt+S are chords |
+| focus | focus reports (`CSI I` / `CSI O`) as the environment's `window_focused` |
 
 What a terminal cannot do:
-- **One font, one size.** `measureText` ignores both: every code point is
-  one cell. Wide characters (CJK, most emoji) take two cells on screen but
-  are measured as one.
+- **One font, one size.** `Text.zuiMeasure` ignores both: every code
+  point is one cell, plus the letter spacing after it. Wide characters
+  (CJK, most emoji) take two cells on screen but are measured as one.
 - **Borders never overwrite glyphs.** zui draws borders after their
   children, so a border cell that already holds text keeps it.
-- **Clicks can arrive whole.** A press and release read together are
-  spread over two frames, so zui still sees the press.
+- **No cursor shapes or IME window.** The frame's host requests are not
+  applied.
 
 ## Use it in your application
 
 ```zig
 const zui_terminal = @import("zui_terminal");
 const zui = zui_terminal.zui;
-const Ui = zui.Context(.{}, zui_terminal.Platform);
+const Ui = zui.Context(zui_terminal.config(.{}));
 
 var terminal = try zui_terminal.Terminal.enter(io);
 defer terminal.leave();
-var platform: zui_terminal.Platform = .{ .waker = &terminal.waker };
-var ui = try Ui.init(gpa, io, &platform);
+var text: zui_terminal.Text = .{};
+var ui = try Ui.init(gpa, io, &text);
 var screen: zui_terminal.Screen = .{};
 var decoder: zui_terminal.InputDecoder = .{};
 
 while (!decoder.quit_requested) {
     const size = terminal.size();
-    ui.beginFrame(decoder.take(viewport_for(size), dt_seconds));
+    ui.beginFrame(&.{ .params = .{ .now = terminal.now(), .viewport = viewportFor(size) }, .events = decoder.take() });
     // ... declare your UI ...
-    const frame = ui.endFrame() catch ui.lastFrame();
-    zui_terminal.render(Ui.RenderCommand, try screen.begin(gpa, size, background), platform.cell_size, frame.commands(), .{});
+    const frame = ui.endFrame();
+    zui_terminal.render(Ui.RenderCommand, try screen.begin(gpa, size, background), text.cell_size, frame.commands(), .{});
     try screen.present(stdout);
     ui.release(frame);
-    terminal.waitForInput(if (ui.needsFrame() or decoder.hasUndeliveredInput()) .next_frame else .idle);
-    decoder.feed(terminal.readAvailable(&read_buffer));
+    terminal.wait(ui.nextFrame());
+    decoder.feed(terminal.readAvailable(&read_buffer), terminal.now());
 }
 ```
 
-`Platform.wake` ends an idle wait from a task thread: on Windows by
-writing a console input record, elsewhere through a pipe. On Linux and
-macOS an idle wait also times out every 250 ms to notice resizes.
+`terminal.wait` sleeps as `nextFrame` says: not at all, until a
+requested instant, or until input, a resize or a wake, so an idle UI uses
+no CPU. `terminal.waker()` is a `zui.Waker` for sources' producers: on
+Windows it writes a console input record, elsewhere it writes to a pipe,
+and either way a wake that arrives before the wait still ends it. On
+Linux and macOS a resize does not wake `poll`, so an idle wait looks at
+the size every 250 ms and runs a frame only when it changed.
 
 ## License
 

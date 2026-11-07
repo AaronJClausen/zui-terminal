@@ -1,5 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const zui = @import("zui");
 const screen = @import("screen.zig");
 
 const is_windows = builtin.os.tag == .windows;
@@ -13,7 +14,7 @@ pub const Terminal = struct {
     stdin: std.Io.File,
     stdout: std.Io.File,
     saved: SavedState,
-    waker: Waker,
+    wake_signal: WakeSignal,
     /// Left over from a UTF-16 surrogate pair split across console records.
     pending_high_surrogate: ?u16 = null,
 
@@ -23,7 +24,7 @@ pub const Terminal = struct {
             .stdin = .stdin(),
             .stdout = .stdout(),
             .saved = undefined,
-            .waker = undefined,
+            .wake_signal = undefined,
         };
         if (is_windows) {
             try self.enterWindows();
@@ -42,8 +43,8 @@ pub const Terminal = struct {
             _ = SetConsoleOutputCP(self.saved.output_code_page);
         } else {
             posix.tcsetattr(self.stdin.handle, .FLUSH, self.saved.termios) catch {};
-            _ = posix.system.close(self.waker.read_end);
-            _ = posix.system.close(self.waker.write_end);
+            _ = posix.system.close(self.wake_signal.read_end);
+            _ = posix.system.close(self.wake_signal.write_end);
         }
     }
 
@@ -61,32 +62,53 @@ pub const Terminal = struct {
         return .{ window_size.col, window_size.row };
     }
 
-    pub const Wait = enum {
-        /// Up to one 60 Hz frame, for when the UI is animating or has input
-        /// it still has to deliver.
-        next_frame,
-        /// Until input, a resize or a `Waker.wake`.
-        idle,
-    };
+    /// The host's monotonic clock, for frame records.
+    pub fn now(self: *const Terminal) zui.Instant {
+        return .fromTimestamp(std.Io.Timestamp.now(self.io, .awake));
+    }
 
-    pub fn waitForInput(self: *Terminal, wait: Wait) void {
-        const frame_milliseconds = 16;
+    /// Ends a `wait` from any thread, so what a producer published gets
+    /// drawn. Sticky: a wake while the loop is not waiting ends its next one.
+    pub fn waker(self: *Terminal) zui.Waker {
+        return .{ .context = &self.wake_signal, .wakeFn = WakeSignal.wake };
+    }
+
+    /// Sleeps as `next` says: not at all, until its instant, or until input,
+    /// a resize or a wake.
+    pub fn wait(self: *Terminal, next: zui.NextFrame) void {
+        const timeout_milliseconds: ?u32 = switch (next) {
+            .immediately => return,
+            .at => |deadline| millisecondsUntil(self.now(), deadline),
+            .on_event => null,
+        };
         if (is_windows) {
-            const timeout: windows.DWORD = if (wait == .next_frame) frame_milliseconds else infinite_wait;
-            _ = WaitForSingleObject(self.stdin.handle, timeout);
+            // A resize queues a console input record too, which ends the wait.
+            _ = WaitForSingleObject(self.stdin.handle, timeout_milliseconds orelse infinite_wait);
             return;
         }
-        // SIGWINCH does not wake `poll`, so an idle wait still times out to
-        // notice resizes.
-        const posix_idle_milliseconds = 250;
-        var descriptors = [_]posix.pollfd{
-            .{ .fd = self.stdin.handle, .events = posix.POLL.IN, .revents = 0 },
-            .{ .fd = self.waker.read_end, .events = posix.POLL.IN, .revents = 0 },
-        };
-        _ = posix.poll(&descriptors, if (wait == .next_frame) frame_milliseconds else posix_idle_milliseconds) catch return;
-        if (descriptors[1].revents & posix.POLL.IN != 0) {
-            var drained: [64]u8 = undefined;
-            _ = posix.read(self.waker.read_end, &drained) catch {};
+        // SIGWINCH does not wake `poll`, so the wait wakes now and then to
+        // look for a resize, and keeps waiting when there was none.
+        const resize_check_milliseconds: u32 = 250;
+        const size_before = self.size();
+        var remaining = timeout_milliseconds;
+        while (true) {
+            const slice = @min(remaining orelse resize_check_milliseconds, resize_check_milliseconds);
+            var descriptors = [_]posix.pollfd{
+                .{ .fd = self.stdin.handle, .events = posix.POLL.IN, .revents = 0 },
+                .{ .fd = self.wake_signal.read_end, .events = posix.POLL.IN, .revents = 0 },
+            };
+            const ready = posix.poll(&descriptors, @intCast(slice)) catch return;
+            if (descriptors[1].revents & posix.POLL.IN != 0) {
+                var drained: [64]u8 = undefined;
+                _ = posix.read(self.wake_signal.read_end, &drained) catch {};
+            }
+            if (ready != 0) return;
+            if (remaining) |*left| {
+                left.* -= slice;
+                if (left.* == 0) return;
+            }
+            const size_now = self.size();
+            if (size_now[0] != size_before[0] or size_now[1] != size_before[1]) return;
         }
     }
 
@@ -113,7 +135,7 @@ pub const Terminal = struct {
         if (SetConsoleMode(self.stdin.handle, raw_input) == .FALSE) return error.VirtualTerminalInputUnsupported;
         if (SetConsoleMode(self.stdout.handle, vt_output) == .FALSE) return error.VirtualTerminalOutputUnsupported;
         _ = SetConsoleOutputCP(utf8_code_page);
-        self.waker = .{ .console_input = self.stdin.handle };
+        self.wake_signal = .{ .console_input = self.stdin.handle };
     }
 
     fn enterPosix(self: *Terminal) !void {
@@ -137,7 +159,7 @@ pub const Terminal = struct {
             posix.tcsetattr(self.stdin.handle, .FLUSH, original) catch {};
             return error.PipeFailed;
         }
-        self.waker = .{ .read_end = pipe_ends[0], .write_end = pipe_ends[1] };
+        self.wake_signal = .{ .read_end = pipe_ends[0], .write_end = pipe_ends[1] };
     }
 
     /// With ENABLE_VIRTUAL_TERMINAL_INPUT, keys and mouse reports arrive as
@@ -179,12 +201,16 @@ pub const Terminal = struct {
     }
 };
 
-/// Ends a `Terminal.waitForInput(.idle)` from any thread, so a completed
-/// background task gets drawn.
-pub const Waker = if (is_windows) struct {
+fn millisecondsUntil(now: zui.Instant, deadline: zui.Instant) u32 {
+    const nanoseconds = deadline.nanoseconds -| now.nanoseconds;
+    return std.math.lossyCast(u32, nanoseconds / std.time.ns_per_ms + @intFromBool(nanoseconds % std.time.ns_per_ms != 0));
+}
+
+const WakeSignal = if (is_windows) struct {
     console_input: windows.HANDLE,
 
-    pub fn wake(self: *const Waker) void {
+    fn wake(context: *anyopaque) void {
+        const self: *const @This() = @ptrCast(@alignCast(context));
         // Any record signals the console handle; a focus record is ignored
         // by `readAvailable`.
         const record: INPUT_RECORD = .{ .EventType = FOCUS_EVENT, .Event = .{ .padding = @splat(0) } };
@@ -195,7 +221,8 @@ pub const Waker = if (is_windows) struct {
     read_end: posix.fd_t,
     write_end: posix.fd_t,
 
-    pub fn wake(self: *const Waker) void {
+    fn wake(context: *anyopaque) void {
+        const self: *const @This() = @ptrCast(@alignCast(context));
         _ = posix.system.write(self.write_end, "w", 1);
     }
 };
@@ -253,6 +280,12 @@ extern "kernel32" fn WaitForSingleObject(handle: windows.HANDLE, milliseconds: w
 extern "kernel32" fn GetNumberOfConsoleInputEvents(console: windows.HANDLE, count: *windows.DWORD) callconv(.winapi) windows.BOOL;
 extern "kernel32" fn ReadConsoleInputW(console: windows.HANDLE, records: [*]INPUT_RECORD, length: windows.DWORD, read: *windows.DWORD) callconv(.winapi) windows.BOOL;
 extern "kernel32" fn WriteConsoleInputW(console: windows.HANDLE, records: [*]const INPUT_RECORD, length: windows.DWORD, written: *windows.DWORD) callconv(.winapi) windows.BOOL;
+
+test "a deadline rounds up to whole milliseconds" {
+    const now: zui.Instant = .fromNanoseconds(1_000_000);
+    try std.testing.expectEqual(@as(u32, 0), millisecondsUntil(now, .fromNanoseconds(10)));
+    try std.testing.expectEqual(@as(u32, 2), millisecondsUntil(now, now.addNanoseconds(1_500_000)));
+}
 
 test "console records match the Windows layout" {
     try std.testing.expectEqual(16, @sizeOf(KEY_EVENT_RECORD));

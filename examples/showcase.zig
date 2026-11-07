@@ -52,7 +52,7 @@ pub fn Showcase(comptime Ui: type) type {
         about_open: bool = false,
 
         pub fn declare(self: *Self, ui: *Ui) void {
-            ui.open(.{ .layout = .{ .direction = .top_to_bottom, .sizing = .grow_both }, .background = self.palette.background });
+            ui.open(.{ .layout = .{ .direction = .top_to_bottom, .sizing = .grow_both }, .decoration = .{ .background = self.palette.background } });
             defer ui.close();
             self.toolbar(ui);
             {
@@ -72,8 +72,7 @@ pub fn Showcase(comptime Ui: type) type {
             ui.open(.{
                 .id = ids.toolbar,
                 .layout = .{ .sizing = .{ .width = .grow, .height = .fixed(self.metrics.toolbar_height) }, .padding = .symmetric(self.metrics.padding, 0), .child_gap = self.metrics.gap, .child_alignment = .{ .y = .center } },
-                .background = self.palette.panel,
-                .border = .{ .color = self.palette.border, .widths = .{ .bottom = 1 } },
+                .decoration = .{ .background = self.palette.panel, .border = .{ .color = self.palette.border, .widths = .{ .bottom = 1 } } },
             });
             defer ui.close();
 
@@ -92,7 +91,7 @@ pub fn Showcase(comptime Ui: type) type {
             ui.open(.{
                 .id = ids.sidebar,
                 .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .fixed(self.metrics.sidebar_width), .height = .grow } },
-                .background = self.palette.sidebar,
+                .decoration = .{ .background = self.palette.sidebar },
                 .scroll = .{},
             });
             defer ui.close();
@@ -104,9 +103,12 @@ pub fn Showcase(comptime Ui: type) type {
                 ui.open(.{
                     .id = id,
                     .focusable = true,
+                    .cursor = .pointer,
                     .layout = .{ .sizing = .{ .width = .grow, .height = .fixed(self.metrics.row_height) }, .padding = .symmetric(self.metrics.padding, 0), .child_alignment = .{ .y = .center } },
-                    .background = if (self.selected_row == index) self.palette.accent else if (state == .hovered or state == .pressed) self.palette.hovered_row else null,
-                    .border = if (ui.focused(id)) .{ .color = self.palette.highlight, .widths = .all(1) } else null,
+                    .decoration = .{
+                        .background = if (self.selected_row == index) self.palette.accent else if (state == .hovered or state == .pressed) self.palette.hovered_row else null,
+                        .border = if (ui.focused(id)) .{ .color = self.palette.highlight, .widths = .all(1) } else null,
+                    },
                 });
                 const name = std.fmt.bufPrint(&name_buffer, "Document {d}", .{index + 1}) catch "Document";
                 self.body(ui, name, self.palette.text);
@@ -134,15 +136,14 @@ pub fn Showcase(comptime Ui: type) type {
             ui.close();
 
             {
-                ui.open(.{ .id = ids.hover_me, .interactive = true, .layout = .{ .padding = .symmetric(self.metrics.padding, self.metrics.padding / 2) }, .background = self.widgets.theme.control.get(ui.widgetState(ids.hover_me)), .corner_radius = .all(self.metrics.corner_radius) });
+                ui.open(.{ .id = ids.hover_me, .interactive = true, .layout = .{ .padding = .symmetric(self.metrics.padding, self.metrics.padding / 2) }, .decoration = .{ .background = self.widgets.theme.control.get(ui.widgetState(ids.hover_me)), .corner_radius = .all(self.metrics.corner_radius) } });
                 defer ui.close();
                 self.body(ui, "Hover me", self.palette.text);
                 if (ui.hovered(ids.hover_me) and self.show_tooltips) {
                     ui.open(.{
                         .floating = .{ .anchor = .top_left, .attach_point = .bottom_left, .offset = .{ 0, self.metrics.gap / 2 } },
                         .layout = .{ .padding = .symmetric(self.metrics.padding / 2, self.metrics.padding / 4) },
-                        .background = self.palette.highlight,
-                        .corner_radius = .all(self.metrics.corner_radius),
+                        .decoration = .{ .background = self.palette.highlight, .corner_radius = .all(self.metrics.corner_radius) },
                     });
                     self.body(ui, "A floating tooltip", self.palette.background);
                     ui.close();
@@ -163,15 +164,13 @@ pub fn Showcase(comptime Ui: type) type {
                 .interactive = true,
                 .floating = .{ .attach_to = .root, .z = 10 },
                 .layout = .{ .sizing = .grow_both, .child_alignment = .{ .x = .center, .y = .center } },
-                .background = self.palette.overlay,
+                .decoration = .{ .background = self.palette.overlay },
             });
             defer ui.close();
             ui.open(.{
                 .focus_scope = true,
                 .layout = .{ .direction = .top_to_bottom, .sizing = .{ .width = .fixed(self.metrics.dialog_width) }, .padding = .all(self.metrics.padding), .child_gap = self.metrics.gap },
-                .background = self.palette.panel,
-                .corner_radius = .all(self.metrics.corner_radius),
-                .border = .{ .color = self.palette.border, .widths = .all(1) },
+                .decoration = .{ .background = self.palette.panel, .corner_radius = .all(self.metrics.corner_radius), .border = .{ .color = self.palette.border, .widths = .all(1) } },
             });
             defer ui.close();
             ui.text("About", .{ .size = self.metrics.title_size, .color = self.palette.text });

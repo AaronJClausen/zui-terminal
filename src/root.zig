@@ -15,27 +15,28 @@ pub const render = cells.render;
 
 pub const Screen = @import("screen.zig").Screen;
 pub const InputDecoder = @import("input.zig").InputDecoder;
-
-const terminal = @import("terminal.zig");
-pub const Terminal = terminal.Terminal;
-pub const Waker = terminal.Waker;
+pub const Terminal = @import("terminal.zig").Terminal;
 
 /// Layout units per terminal cell. Layout stays in pixel-like units so that
 /// UIs written for pixel renderers lay out sensibly in a terminal too.
 pub const default_cell_size: [2]f32 = .{ 8, 16 };
 
-/// Every glyph is one cell wide and one cell tall, whatever the font or
-/// size: a terminal has one font, at one size.
-pub const Platform = struct {
+/// A `zui.Config` measuring text in cells; override any field:
+/// `zui.Context(zui_terminal.config(.{ .limits = .{ .max_elements = 8192 } }))`.
+pub fn config(overrides: zui.Config) zui.Config {
+    var result = overrides;
+    result.Text = Text;
+    return result;
+}
+
+/// The text contract of a terminal, which has one font at one size: every
+/// code point is one cell wide, plus the letter spacing after it, and one
+/// cell tall.
+pub const Text = struct {
     cell_size: [2]f32 = default_cell_size,
-    waker: ?*const Waker = null,
 
-    pub fn measureText(self: *Platform, text: []const u8, _: u16, _: f32) [2]f32 {
-        return .{ @as(f32, @floatFromInt(codepointCount(text))) * self.cell_size[0], self.cell_size[1] };
-    }
-
-    pub fn wake(self: *Platform) void {
-        if (self.waker) |waker| waker.wake();
+    pub fn zuiMeasure(self: *Text, run: []const u8, key: zui.MeasureKey(u16)) [2]f32 {
+        return .{ @as(f32, @floatFromInt(codepointCount(run))) * (self.cell_size[0] + key.letter_spacing), self.cell_size[1] };
     }
 };
 
@@ -48,18 +49,24 @@ pub fn codepointCount(text: []const u8) usize {
     return count;
 }
 
+fn measure(text: *Text, run: []const u8, size: f32, letter_spacing: f32) [2]f32 {
+    return text.zuiMeasure(run, .{ .font = 0, .size = size, .letter_spacing = letter_spacing });
+}
+
 test "measurement is additive and ignores the font size" {
-    var platform: Platform = .{};
-    const one = platform.measureText("one", 0, 16);
-    const space = platform.measureText(" ", 0, 16);
-    const two = platform.measureText("two", 0, 40);
-    try std.testing.expectEqual(platform.measureText("one two", 0, 16)[0], one[0] + space[0] + two[0]);
+    var text: Text = .{};
+    const one = measure(&text, "one", 16, 0);
+    const space = measure(&text, " ", 16, 0);
+    const two = measure(&text, "two", 40, 0);
+    try std.testing.expectEqual(measure(&text, "one two", 16, 0)[0], one[0] + space[0] + two[0]);
     try std.testing.expectEqual(@as(f32, 16), two[1]);
 }
 
-test "measurement counts code points, not bytes" {
-    var platform: Platform = .{};
-    try std.testing.expectEqual(@as(f32, 4 * 8), platform.measureText("café", 0, 16)[0]);
+test "letter spacing follows every code point, so measurement stays additive" {
+    var text: Text = .{};
+    try std.testing.expectEqual(@as(f32, 4 * 8), measure(&text, "café", 16, 0)[0]);
+    try std.testing.expectEqual(@as(f32, 4 * 16), measure(&text, "café", 16, 8)[0]);
+    try std.testing.expectEqual(measure(&text, "ab", 16, 8)[0], measure(&text, "a", 16, 8)[0] + measure(&text, "b", 16, 8)[0]);
 }
 
 test {
@@ -67,4 +74,5 @@ test {
     _ = cells;
     _ = @import("screen.zig");
     _ = @import("input.zig");
+    _ = @import("terminal.zig");
 }

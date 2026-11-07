@@ -120,7 +120,7 @@ pub fn render(comptime Command: type, buffer: *CellBuffer, cell_size: [2]f32, co
         switch (command.payload) {
             .rectangle => |rectangle| fillRectangle(buffer, area.intersect(clips.current()), rectangle.color),
             .border => |border| drawBorder(buffer, area, clips.current(), border.color, border.widths, border.corner_radius),
-            .text => |text| drawText(buffer, area, clips.current(), text.content, text.style.color),
+            .text => |text| drawText(buffer, area, clips.current(), text.content, text.style.color, (cell_size[0] + text.style.letter_spacing) / cell_size[0]),
             .image => |handle| if (options.draw_image) |draw_image| draw_image(handle, area.intersect(clips.current()), buffer),
             .custom => |data| if (options.draw_custom) |draw_custom| draw_custom(data, area.intersect(clips.current()), buffer),
             .clip_begin => |clip| clips.push(CellRect.fromLayout(clip, cell_size)),
@@ -209,12 +209,14 @@ fn putBorderGlyph(buffer: *CellBuffer, clip: CellRect, column: i32, row: i32, gl
 }
 
 /// zui wraps text itself and emits one command per line, so a line starts
-/// at its bounds and never needs wrapping here.
-fn drawText(buffer: *CellBuffer, area: CellRect, clip: CellRect, content: []const u8, color: zui.Color) void {
-    var column = area.left;
+/// at its bounds and never needs wrapping here. Letter spacing moves each
+/// glyph to the cell nearest where it would start.
+fn drawText(buffer: *CellBuffer, area: CellRect, clip: CellRect, content: []const u8, color: zui.Color, glyph_pitch_in_cells: f32) void {
     const row = area.top;
-    var codepoints = (std.unicode.Utf8View.init(content) catch return drawInvalidUtf8(buffer, area, clip, content.len, color)).iterator();
-    while (codepoints.nextCodepoint()) |codepoint| : (column += 1) {
+    var glyph_index: usize = 0;
+    var codepoints = (std.unicode.Utf8View.init(content) catch return drawInvalidUtf8(buffer, area, clip, content.len, color, glyph_pitch_in_cells)).iterator();
+    while (codepoints.nextCodepoint()) |codepoint| : (glyph_index += 1) {
+        const column = glyphColumn(area, glyph_index, glyph_pitch_in_cells);
         if (column >= clip.right) return;
         if (!clip.contains(column, row)) continue;
         const cell = buffer.at(column, row);
@@ -223,16 +225,19 @@ fn drawText(buffer: *CellBuffer, area: CellRect, clip: CellRect, content: []cons
     }
 }
 
-fn drawInvalidUtf8(buffer: *CellBuffer, area: CellRect, clip: CellRect, length: usize, color: zui.Color) void {
-    var column = area.left;
-    for (0..length) |_| {
+fn drawInvalidUtf8(buffer: *CellBuffer, area: CellRect, clip: CellRect, length: usize, color: zui.Color, glyph_pitch_in_cells: f32) void {
+    for (0..length) |glyph_index| {
+        const column = glyphColumn(area, glyph_index, glyph_pitch_in_cells);
         if (clip.contains(column, area.top)) {
             const cell = buffer.at(column, area.top);
             cell.codepoint = std.unicode.replacement_character;
             cell.foreground = blend(cell.background, color);
         }
-        column += 1;
     }
+}
+
+fn glyphColumn(area: CellRect, glyph_index: usize, glyph_pitch_in_cells: f32) i32 {
+    return area.left + roundToCell(@as(f32, @floatFromInt(glyph_index)) * glyph_pitch_in_cells);
 }
 
 /// zui's clip rectangles are already intersected with every enclosing clip,
@@ -266,7 +271,7 @@ const ClipStack = struct {
 };
 
 const testing = std.testing;
-const TestUi = zui.Context(.{}, @import("zui_testing").FixedMetricsPlatform(u16));
+const TestUi = zui.Context(.{ .Text = @import("zui_testing").FixedMetricsText(u16) });
 const TestCommand = TestUi.RenderCommand;
 
 fn testBuffer(columns: u16, rows: u16) !CellBuffer {
@@ -326,4 +331,15 @@ test "translucent rectangles blend over what is below" {
     render(TestCommand, &buffer, .{ 8, 16 }, &commands, .{});
     try testing.expect(buffer.at(0, 0).background.r < 200);
     try testing.expectEqual(@as(u8, 255), buffer.at(1, 0).background.r);
+}
+
+test "letter spacing spreads glyphs over the cells it covers" {
+    var buffer = try testBuffer(6, 1);
+    defer buffer.deinit(testing.allocator);
+    const commands = [_]TestCommand{
+        .{ .bounds = .{ .width = 48, .height = 16 }, .id = 0, .z = 0, .payload = .{ .text = .{ .content = "abc", .style = .{ .letter_spacing = 8 }, .line = 0 } } },
+    };
+    render(TestCommand, &buffer, .{ 8, 16 }, &commands, .{});
+    var output: [16]u8 = undefined;
+    try testing.expectEqualStrings("a b c ", rowText(&buffer, 0, &output));
 }

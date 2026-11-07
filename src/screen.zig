@@ -5,9 +5,10 @@ const Cell = cells.Cell;
 const CellBuffer = cells.CellBuffer;
 
 /// Alternate screen, hidden cursor, no autowrap (so the bottom-right cell
-/// can be written without scrolling), and SGR mouse reports for every motion.
-pub const enter_sequence = "\x1b[?1049h\x1b[?25l\x1b[?7l\x1b[?1003h\x1b[?1006h";
-pub const leave_sequence = "\x1b[?1006l\x1b[?1003l\x1b[?7h\x1b[0m\x1b[?25h\x1b[?1049l";
+/// can be written without scrolling), SGR mouse reports for every motion, and
+/// focus reports.
+pub const enter_sequence = "\x1b[?1049h\x1b[?25l\x1b[?7l\x1b[?1003h\x1b[?1006h\x1b[?1004h";
+pub const leave_sequence = "\x1b[?1004l\x1b[?1006l\x1b[?1003l\x1b[?7h\x1b[0m\x1b[?25h\x1b[?1049l";
 const begin_synchronized_update = "\x1b[?2026h";
 const end_synchronized_update = "\x1b[?2026l";
 
