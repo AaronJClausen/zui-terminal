@@ -5,8 +5,8 @@
     .minimum_zig_version = "0.16.0",
     .dependencies = .{
         .zui = .{
-            .url = "git+https://github.com/AaronJClausen/zui#0268dbdbbc5567001e9165e0b5769569ed6162e7",
-            .hash = "zui-0.5.0-xfvfqrgaDAATfHR6ScVbYxFdBlJlbbQneuNwOZ46QYD_",
+            .url = "git+https://github.com/AaronJClausen/zui#397ce2852957134f3bbaba04dd39f948a0e61313",
+            .hash = "zui-0.5.0-xfvfqp8lEgCx9-uodEtfwmuOy00JMomjvfjtLimxVkCJ",
         },
     },
     .paths = .{ "build.zig", "build.zig.zon", "src", "examples", "README.md", "LICENSE" },
